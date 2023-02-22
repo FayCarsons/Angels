@@ -4,26 +4,21 @@
             [sdf.config :as c]
             [sprog.input.keyboard :refer [add-key-callback]]
             [sprog.webgl.core :refer [start-sprog!
-                                      update-sprog-state!
-                                      sprog-context
-                                      sprog-state]]
+                                      stop-sprog!
+                                      merge-sprog-state!
+                                      sprog-context]]
             [sprog.dom.canvas :refer [maximize-gl-canvas 
+                                      resize-canvas
                                       canvas-resolution
                                       save-image]] 
             [sprog.webgl.shaders :refer [run-purefrag-shader!
                                          run-shaders!]]
             [sprog.webgl.textures :refer [create-tex
-                                          html-image-tex]]
-            ))
-
-(def init-state  {:frame 0
-                  :screenshot? false})
-(def u32-max (dec (Math/pow 2 32)))
-(def screenshot-atom (atom false))
-
+                                          html-image-tex]]))
 
 (defn expand-canvas [gl]
-  (maximize-gl-canvas gl {:square? false}))
+  #_(maximize-gl-canvas gl {:square? false})
+  (resize-canvas gl.canvas [1800 1800]))
 
 (defn update-particles! [{:keys [gl
                                  location-texs
@@ -63,43 +58,40 @@
         (update :trail-texs reverse))))
 
 (defn render! [{:keys [gl
-                       frame
                        trail-texs
-                       norm-tex
-                       location-texs] :as state}]
+                       background-tex] :as state}]
   (let [resolution (canvas-resolution gl)]
     (run-purefrag-shader! gl
                           s/render-source
                           resolution
                           {:floats {"size" resolution}
                            :textures {"tex" (first trail-texs)
-                                      "field" norm-tex
-                                      "location" (second location-texs)}})
+                                      "noiseTex" background-tex}})
     state))
 
 
 (defn update-page! [{:keys [gl
                             frame
-                            screenshot?] :as state}]
-  (expand-canvas gl) 
-  (when screenshot?
-    (let [letters "kjfgbaoiuho387gtp9utyn t09ynv9uynv9yniouhnpwdijhn0u09ynpioyamlkjhnlf"]
-      (save-image gl.canvas (apply str (take 4 (shuffle (seq letters))))))) 
-  
-  (if (< frame 60)
+                            rendered?] :as state}]
+  (expand-canvas gl)
+  #_(when rendered? 
+    (js/alert "rendered!")
+    (stop-sprog!))
+  (if (or c/unlimit?
+          (<= frame c/frame-limit))
     (-> state
         update-particles!
         render!
-        (assoc :screenshot? false)
         (update :frame inc))
-    (merge state {:screenshot? false})))
+    (assoc state :rendered? true)))
 
 (defn init-page! [gl] 
   (expand-canvas gl)
   (let [resolution (canvas-resolution gl)
         norm-tex (create-tex gl :u32 resolution)
+        background-tex (create-tex gl :u32 resolution)
         location-texs (u/gen 2 (create-tex gl :u32 c/particle-amount {:channels 2}))
-        trail-texs (u/gen 2 (create-tex gl :u32 resolution))] 
+        trail-texs (u/gen 2 (create-tex gl :u32 (u/log resolution)))] 
     (run-purefrag-shader! gl
                           s/init-frag-source
                           c/particle-amount
@@ -107,16 +99,20 @@
                                             c/particle-amount]}}
                           {:target (first location-texs)})
     (run-purefrag-shader! gl
+                          s/background-source
+                          resolution 
+                          {:floats {"size" resolution}}
+                          {:target background-tex})
+    (run-purefrag-shader! gl
                           s/norm-field-frag-source
                           resolution
                           {:floats {"size" resolution
                                     "time" (u/seconds-since-startup)}}
-                          {:target norm-tex})
-    (add-key-callback "s"
-                      (fn []
-                        (update-sprog-state! #(merge % {:screenshot? true}))))
+                          {:target norm-tex}) 
     {:frame 0
+     :rendered? false
      :norm-tex norm-tex
+     :background-tex background-tex
      :location-texs location-texs
      :trail-texs trail-texs}))
 
