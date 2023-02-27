@@ -1,6 +1,8 @@
 {:deps
  {thheller/shadow-cljs
   {:mvn/version "2.19.1"}
+  org.clojure/math.combinatorics 
+  {:mvn/version "0.1.6"}
   io.github.Ella-Hoeppner/sprog
   {:git/sha "90c967c57b1e20266bab77894d461d46529eac33"}
   io.github.Ella-Hoeppner/fxrng

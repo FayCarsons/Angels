@@ -1,31 +1,118 @@
 (ns sdf.config
   (:require [sprog.util :as u]
-            [fxrng.rng :refer [fxrand fxrand-nth]]))
+            [fxrng.rng :refer [fxrand
+                               fxrand-nth
+                               fxchance
+                               fxrand-int]]
+            [clojure.math.combinatorics :refer [cartesian-product]]))
 
-(def particle-amount 400)
+;transport
+(def frame-limit 600)
+(def special? (fxchance 0.02))
+
+;utilities
+(def circle-count 8)
+(def max-circle-radius 0.05)
+
+(defn check-overlap [[circle-one circle-two]]
+  (let [[pos-one radius-one] circle-one
+        [pos-two radius-two] circle-two]
+    (empty? (filter #(or (< radius-one %)
+                         (< radius-two %))
+                    (map (comp abs -) pos-one pos-two)))))
+(defn get-circle []
+  [[(fxrand 0.1 0.9) (fxrand 0.1 0.9)] (fxrand max-circle-radius)])
+
+(defn check-circles [circle-vec]
+  (remove check-overlap 
+          (cartesian-product circle-vec 
+                             circle-vec)))
+
+(defn pack-circles [circle-vec]
+  (let [circles (u/genv circle-count (get-circle))]
+    (if (< (count (check-circles (cons circle-vec circles)))
+           circle-count)
+      (pack-circles (cons circle-vec circles))
+      (cons circle-vec circles))))
+
+(def circle-expr
+  (let [cljs-circles (pack-circles (get-circle))
+        circles (map (fn [circle]
+                       (u/unquotable
+                        '(- (length (- pos
+                                       ~(cons 'vec2 (first circle))))
+                            ~(last circle))))
+                     cljs-circles)]
+    (reduce (fn [expr term]
+              (list 'min expr term))
+            circles)))
+
+;sketch
+(def sqrt-sketch-particle-amount 512)
+(def sketch-particle-amount [sqrt-sketch-particle-amount 
+                             sqrt-sketch-particle-amount])
 (def radius 0.0002)
-(def paretto? false)
-(def paretto-scale 1)
-(def paretto-shape 0.1)
-(def speed 0.00002)
-(def randomization-chance 1)
+(def paretto? true)
+(def paretto-scale 2)
+(def paretto-shape 0.5)
+(def sketch-speed 0.00002)
+(def sketch-fade 0.999)
+(def sketch-randomization-chance 1)
+
+;background
+(def sqrt-background-particle-amount 128)
+(def background-particle-amount [sqrt-background-particle-amount
+                                 sqrt-background-particle-amount])
+(def background-field-resolution (u/genv 2 512))
+(def background-radius (if special? 0.0002 0.00025))
+(def background-fade 0.995)
+(def background-reset-interval 5)
+(def background-particle-speed 0.0002)
+(def background-randomization-chance 0.99)
+(def frame-width 0.01)
+;colors
+(def antique-white (cons 'vec3 (map #(/ % 255) (list 250 235 215))))
+(def yellow-beige (cons 'vec3 (map #(/ % 255) [244 212 170])))
+(def light-brown (cons 'vec3 (map #(/ % 255) [208 192 175])))
+(def olive (cons 'vec3 (map #(/ % 255) [64 64 0])))
+(def burnt-sienna (cons 'vec3 (map #(/ % 255) [213 69 35])))
+(def mustard (cons 'vec3 (map #(/ % 230) [209 169 70])))
+(def red (cons 'vec3 (map #(/ % 230) [255 1 1])))
+(def yellow (cons 'vec3 (map #(/ % 255) [255 240 1])))
+(def blue (cons 'vec3 (map #(/ % 255) [1 1 253])))
+(def special-mode (u/unquotable ['(mixOklab ~red
+                                            ~yellow
+                                            (sigmoid (+ ~circle-expr
+                                                        (-> pos
+                                                            (* ~(fxrand 5))
+                                                            snoise2D))))
+                                 0.9]))
+
+(def background-highlight  (if special?
+                            special-mode
+                            (fxrand-nth [[yellow-beige 0.75]
+                                         [light-brown 0.5]
+                                         [olive 0.15]])))
+
+;raymarching
+(def raymarch-anti-aliasing-samples (str 1))
 (def sphere-octaves 5)
-(def plane-iters (str 8))
+(def plane-iters (str (inc (fxrand-int 8 16))))
 (def plane-size (fxrand 0.03 0.05))
 
 (def ao-dist 0.05)
-(def ao-samples (str 16))
-(def ao-power 4)
+(def ao-samples (str 8))
+(def ao-power 2)
 
 (def light-pos '(vec3 1 -0.5 -0.5))
-(def light-scale 1)
-(def diffusion-power (cons '* (repeat 8 'diff)))
+(def light-scale 0.5)
+(def light-max 0.5)
+(def diffusion-power (cons '* (repeat 2 'diff)))
 
-(def fade 0.999)
-(def frame-limit 600)
-(def unlimit? false)
-(def antique-white (cons 'vec3 (map #(/ % 255) (list 250 235 215))))
-(def light-brown (cons 'vec3 (map #(/ % 255) (list 204 192 175))))
+
+
+
+
 
 (def slab (u/unquotable
            '(max (sdBox pos
@@ -44,3 +131,4 @@
                       (- 0 (sdTorus pos
                                     (vec3 0 -0.7 0.1)
                                     (vec2 0.55 0.11)))))
+
