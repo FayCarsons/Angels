@@ -2,7 +2,6 @@
  :nrepl {:port 8703}
  :dev-http {2323 "out/public"}
  :builds {:browser {:target :browser
-                    :js-options {:babel-preset-config {:targets {:chrome 80}}}
                     :output-dir "out/public/js"
                     :asset-path "/js"
                     :compiler-options {:optimizations :simple

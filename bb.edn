@@ -1,0 +1,4 @@
+{:tasks
+ {clear-js (shell "rm -r ./out/public/js")
+  shadow-build (shell "npx shadow-cljs release :browser") 
+  build  {:depends [clear-js shadow-build]}}}

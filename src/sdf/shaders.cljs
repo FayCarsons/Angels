@@ -1,5 +1,6 @@
 (ns sdf.shaders
-  (:require [sprog.util :as u]
+  (:require clojure.walk
+            [sprog.util :as u]
             [sdf.chunks :as chunk]
             [sdf.config :as c]
             [sprog.iglu.chunks.noise :refer [rand-chunk
@@ -11,27 +12,21 @@
             [sprog.iglu.chunks.raytracing :refer [raymarch-chunk
                                                   perspective-camera-chunk]]
             [sprog.iglu.chunks.sdf :as sdf]
-            [sprog.iglu.chunks.transformations :refer [y-rotation-matrix-chunk
-                                                       x-rotation-matrix-chunk
-                                                       z-rotation-matrix-chunk
-                                                       axis-rotation-chunk]]
-            [sprog.iglu.chunks.misc :refer [rescale-chunk
-                                            sigmoid-chunk
+            [sprog.iglu.chunks.transformations :refer [axis-rotation-chunk]]
+            [sprog.iglu.chunks.misc :refer [sigmoid-chunk
                                             pos-chunk 
                                             gradient-chunk
-                                            bilinear-usampler-chunk
-                                            paretto-transform-chunk]]
-            [sprog.iglu.chunks.postprocessing :refer [create-gaussian-sample-chunk
-                                                      square-neighborhood]]
+                                            bilinear-usampler-chunk]] 
             [sprog.iglu.chunks.colors :refer [mix-oklab-chunk]]
 
             [sprog.iglu.core :refer [iglu->glsl
                                      combine-chunks]]
+            [sprog.tools.math :refer [rand-n-sphere-point]]
             [fxrng.rng :refer [fxrand
                                fxchoice
                                fxchance
                                fxrand-int
-                               fxshuffle]]))
+                               fxrand-nth]]))
 
 (def u32-max (Math/floor (dec (Math/pow 2 32))))
 
@@ -41,47 +36,27 @@
                           sampler2D highp
                           usampler2D highp}})
 
-(defn ambient-occlusion-chunk [scene-fn-name
-                               distance
-                               samples
-                               power]
-  (u/unquotable
-   '{:functions 
-     {occlusion
-      {([vec3 vec3] float)
-       ([pos norm]
-        (=float dist ~distance)
-        (=float o 1)
-        (=int smp ~(str (int samples)))
-        ("for (int i = 0; i < smp; ++i)"
-         (= o (min o (/ (~scene-fn-name (+ pos 
-                                               (* dist norm))) 
-                            dist)))
-         (*= dist ~power))
-        (max o 0))}}}))
-
 (def rand-macro-chunk
   (u/unquotable
    (combine-chunks
-    rand-chunk
+    rand-chunk 
     {:macros {:rand
               (fn [seed]
-                '(rand (+ (vec2 ~(- (fxrand 1000) 500)
-                                ~(- (fxrand 1000) 500))
+                '(rand (+ (vec2 ~(fxrand -100 100)
+                                ~(fxrand -100 100))
                           (* ~seed
-                             (vec2 ~(+ (fxrand 1000) 1000)
-                                   ~(+ (fxrand 1000) 1000))))))}})))
+                             (vec2 ~(fxrand 100 1000)
+                                   ~(fxrand 100 1000))))))}})))
 
 (def render-source
   (u/unquotable
    (iglu->glsl
     pos-chunk
     bilinear-usampler-chunk
-    rand-chunk
-    mix-oklab-chunk
     simplex-2d-chunk
     sigmoid-chunk
-    (create-gaussian-sample-chunk :u32 (square-neighborhood 4))
+    rand-chunk
+    mix-oklab-chunk
     '{:version "300 es"
       :precision {float highp
                   int highp
@@ -98,7 +73,11 @@
                                float
                                (/ ~(long u32-max))))
              (=float background (-> backgroundTex
-                                    (textureBilinear pos)
+                                    (textureBilinear
+                                     (+ pos (* ~(fxrand (if c/special? 0.003 0.002) 
+                                                        (if c/special? 0.005 0.0035))
+                                               (vec2 (rand (* pos ~(fxrand 200 400)))
+                                                       (rand (* pos ~(fxrand 200 400)))))))
                                     .x
                                     float
                                     (/ ~(long u32-max))
@@ -118,11 +97,7 @@
                                               background))
                                   (vec3 0.05)
                                   particles)) 
-             (= fragColor (vec4 col #_(-> normals
-                                          (texture pos)
-                                          .xyz
-                                          vec3
-                                          (/ ~(long u32-max))) 1)))})))
+             (= fragColor (vec4 col 1)))})))
 
 (def copy-source 
   (u/unquotable 
@@ -185,8 +160,7 @@
 (def particle-frag-source
   (u/unquotable
    (iglu->glsl
-    header
-    paretto-transform-chunk
+    header 
     rand-chunk
     bilinear-usampler-chunk
     '{:uniforms {radius float
@@ -226,8 +200,6 @@
   (u/unquotable
    (iglu->glsl
     header
-    paretto-transform-chunk
-    rand-macro-chunk 
     '{:outputs {particlePos vec2
                 newRadius float}
       :uniforms {particleTex usampler2D
@@ -246,12 +218,7 @@
 
              (=uvec4 particleColor (texture particleTex texPos))
              (= particlePos (/ (vec2 particleColor.xy) ~u32-max))
-             (= newRadius ~(if c/paretto?
-                             '(min (paretto (:rand particlePos)
-                                            ~c/paretto-shape
-                                            radius)
-                                   (* ~c/paretto-scale radius))
-                             'radius))
+             (= newRadius radius)
              (= gl_Position
                 (vec4 (- (* (+ particlePos
                                (* newRadius
@@ -271,13 +238,11 @@
                       0
                       1)))})))
 
-
 (def logic-frag-source
   (u/unquotable
    (iglu->glsl
     header
     rand-chunk
-    rescale-chunk
     bilinear-usampler-chunk
     '{:outputs {fragColor uvec2}
       :uniforms {size vec2
@@ -312,7 +277,9 @@
                   (> (+ particlePos.y (* field.y speed)) 1)
                   (< (+ particlePos.x (* field.x speed)) 0)
                   (< (+ particlePos.y (* field.y speed)) 0)
-                  (> (rand (* (+ pos particlePos) 400))
+                  (> (rand (+ (* (+ pos particlePos)
+                                 400)
+                              (sin time)))
                      (- randomizationChance
                         field.w)))
 
@@ -323,201 +290,16 @@
             (uvec2 (* (vec2 (+ particlePos (* field.xy speed)))
                       ~u32-max)))))})))
 
-(defn shuffle-axis []
-  (cons 'vec3 
-    (fxshuffle (list 1 1 (fxrand 0.1)))))
-
-
-(defn volcanic [twist-factor]
-  (u/unquotable
-   '((+ (smoothUnion (smoothUnion (sdTorus (twistX pos ~twist-factor)
-                                           (vec3 0)
-                                           (vec2 0.75 0.1))
-                                  (sdTorus (twistY (* pos (xRotationMatrix ~(* 0.5 Math/PI))) ~twist-factor)
-                                           (vec3 0)
-                                           (vec2 0.75 0.1))
-                                  0.25)
-                     (smoothUnion (sdSphere pos
-                                            (vec3 0)
-                                            0.4)
-                                  (sdCapsule pos
-                                             (vec3 0)
-                                             (vec3 0.75 0.75 0)
-                                             (vec3 -0.75 -0.75 0) 0.04)
-                                  0.1)
-                     0.1)
-        (* 0.075
-           (sigmoid (fbm gb
-                         3
-                         pos
-                         "5"
-                         0.7)))))))
-
-(def sliced-torus
-  (u/unquotable
-   '((onion
-     (onion
-      (+ (unionStair (sdTorus (* pos (xRotationMatrix (* 0.25 ~u/TAU)))
-                              (vec3 0)
-                              (vec2 0.5 0.25))
-                     (smoothUnion (sdBoxframe (twistX (* pos
-                                                         (axisRoationMatrix (randSphere ~(cons 'vec3 (u/gen 3 (fxrand))))
-                                                                            ~(fxrand u/TAU)))
-                                                      ~(fxrand-int 5 15))
-                                              (vec3 0)
-                                              (vec3 0.45)
-                                              0.1)
-                                  (sdBoxframe (twistY (* pos
-                                                         (axisRoationMatrix (randSphere ~(cons 'vec3 (u/gen 3 (fxrand))))
-                                                                            ~(fxrand u/TAU)))
-                                                      ~(fxrand-int 5 15))
-                                              (vec3 0)
-                                              (vec3 0.25)
-                                              0.2)
-                                  0.2)
-                     0.5
-                     8)
-         (* 0.1
-            (sigmoid (gaborNoise 3
-                                 ~fxrand
-                                 ~(mapv #(* % 0.25 (inc (fxrand-int 8)))
-                                        [0.5 1 4 7])
-                                 pos))))
-      0.1)
-     0.06))))
-
-(def voronoise-sphere
-  (u/unquotable
-   '((=float sphere (sdSphere pos (vec3 0) 1))
-     (min (max (max (+ sphere
-                       (-> pos
-                           (* (zRotationMatrix ~(fxrand u/TAU)))
-                           fVoronoi
-                           (pow 0.75)
-                           (* ~(fxrand 0.1 0.25))))
-                    (- 0 (sdSphere pos (vec3 0) 0.85)))
-               (- 0 (sdBox (* pos
-                              (axisRoationMatrix (randSphere ~(cons 'vec3 (u/gen 3 (fxrand))))
-                                                 ~(fxrand u/TAU))
-                              #_(zRotationMatrix (* 0.25 ~Math/PI)))
-                           (vec3 0)
-                           (vec3 0.1 10 10))))
-          (sdSphere pos (vec3 0) 0.25)))))
-
-(def menger-box
-  (u/unquotable
-   '((=float d 1024)
-     (~(str "for(int i = 0; i <= " c/sphere-octaves "; ++i)")
-      (=vec3 rot-pos (* pos
-                        (axisRoationMatrix
-                         (randSphere
-                          (* 10 (vec3 (* 33.6987298572 (fract (* (float i)
-                                                                 (float i)
-                                                                 ~(fxrand))))
-                                      (* 42.54869 (rand (vec2 (float i)
-                                                              (* (float i) (- 0 (pow ~(fxrand) (* (float i)
-                                                                                                  (float i))))))))
-                                      (* 51.9028746908274 (rand (vec2 (* (float i)
-                                                                         (float i)
-                                                                         (float i))
-                                                                      (fract (* 0.333 (float i)))))))))
-                         (* ~u/TAU (rand (vec2 (pow 2 (float i))
-                                               (rand (vec2 (mod (* 0.1 (float i)) ~(fxrand))
-                                                           (- 0 (float i))))))))))
-      (=vec3 c (vec3 (* 2 (pow 0.5 (float i)))))
-      (=vec3 q (- (mod (+ rot-pos (* 0.5 c)) c) (* 0.5 c)))
-      (=vec3 index (floor (/ (+ rot-pos (* 0.5 c)) (* 0.5 c))))
-      (=float s #_(sdBoxframe q
-                            (vec3 0)
-                            (vec3 (* 0.5
-                                     #_(mix 0.5 1 (rand (+ index.xy (* ~(fxrand) index.z))))
-                                     (pow 0.5 (float i))))
-                            (* 0.5 (pow 0.5 (float i))))
-              (sdSphere q
-                          (* 0 (vec3 (rand (* index.xy ~(fxrand 400)))
-                                     (rand (* index.yx ~(fxrand 400)))
-                                     (rand (* index.zx ~(fxrand 400)))))
-                          (* 0.9
-                             #_(mix 0.5 1 (rand (+ index.xy (* ~(fxrand 400) index.z))))
-                             (pow 0.5 (float i)))))
-      (= d (min d s)))
-     (min (smoothSubtraction d
-                        (max (sdSphere pos (vec3  0) 1)
-                             (- 0 (sdSphere pos (vec3 0) 0.95)))
-                        #_(sdBox pos
-                                 (vec3 0)
-                                 (vec3 0.75))
-                        0.00001)
-          (+ (sdSphere pos (vec3 0) 0.5)
-             (* 0.1 
-                (sigmoid (gaborNoise 3
-                                     ~fxrand
-                                     ~[0.25 0.5 1 4 7]
-                                     pos))))))))
-
-(def sliced-sphere
-  (u/unquotable 
-   '((=int iters ~c/plane-iters)
-     (=float d 1024)
-     ("for(int i = 1; i <= iters; ++i)"
-      (=vec3 rot-pos (* pos
-                        (axisRoationMatrix (randSphere
-                                            (* 100 (vec3 (* 3 (fract (* (float i)
-                                                                        (float i)
-                                                                        ~(fxrand))))
-                                                         (rand (vec2 (float i)
-                                                                     (* (float i) (- 0 (pow ~(fxrand) (* (float i)
-                                                                                                         (float i)))))))
-                                                         (rand (vec2 (* (float i)
-                                                                        (float i)
-                                                                        (float i))
-                                                                     (fract (* 0.333 (float i))))))))
-                                           (* ~u/TAU (rand (vec2 (pow 2 (float i))
-                                                                 (rand (vec2 (mod (* 0.1 (float i)) ~(fxrand))
-                                                                             (- 0 (float i))))))))))
-      (=float planes (sdBox rot-pos
-                            (vec3 0)
-                            (if (== (% i (* iters (int (floor (rand (vec2 (* (float i) ~(+ 250 (rand 1000)))
-                                                                          (* (float i) ~(+ 250 (rand 1000)))))))))
-                                    ~(str (rand-int c/plane-iters)))
-                              (if (== (% i (* iters (int (floor (rand (vec2 (* (float i) ~(+ 250 (rand 1000)))
-                                                                            (* (float i) ~(+ 250 (rand 1000)))))))))
-                                      ~(str (rand-int c/plane-iters)))
-                                (vec3 ~c/plane-size 1 1)
-                                (vec3 1 ~c/plane-size 1))
-                              (vec3 1 1 ~c/plane-size))))
-      (= d (min d planes)))
-
-
-     (=float sphere (sdSphere pos (vec3 0) 1))
-     (+ (max sphere
-             (- 0 d))
-        (* 0.03
-           (smoothstep -0.1 0 sphere)
-           #_(sigmoid (fbm gb
-                           3
-                           pos
-                           "5"
-                           0.75))
-           (fbm snoise4D
-                4
-                (vec4 (* 3 pos) ~(fxrand 1000))
-                "5"
-                0.8))))))
-
 (def norm-field-frag-source
-  (u/unquotable
+  (u/unquotable 
    (iglu->glsl
+    header
     pos-chunk
-    rescale-chunk
-    chunk/plane-sdf-chunk
     perspective-camera-chunk
     sdf/sphere-sdf-chunk
-    sdf/box-sdf-chunk
-    sdf/box-frame-sdf-chunk
+    sdf/box-sdf-chunk 
     sdf/torus-sdf-chunk
-    sdf/capsule-sdf-chunk
-    chunk/smooth-intersectioon-chunk
+    chunk/smooth-intersection-chunk
     chunk/smooth-subtraction-chunk
     sdf/smooth-union-chunk
     raymarch-chunk
@@ -529,206 +311,135 @@
     rand-chunk
     rand-sphere-chunk
     axis-rotation-chunk
-    x-rotation-matrix-chunk
-    y-rotation-matrix-chunk
-    z-rotation-matrix-chunk
-    chunk/voronoise-3d-chunk
-    chunk/twistX-chunk
-    chunk/twistY-chunk
+    chunk/voronoise-3d-chunk 
     chunk/subtraction-stair-chunk
-    sdf/onion-chunk
-    (ambient-occlusion-chunk 'sdf c/ao-dist c/ao-samples c/ao-power)
-    '{:version "300 es"
-      :precision {float highp
-                  int highp}
-      :uniforms {size vec2
+    '{:uniforms {size vec2
                  time float
-                 mouse vec2}
+                 seedTex usampler2D}
       :outputs {fragColor uvec4}
-      :functions {rot
-                  {([float] mat2)
-                   ([angle]
-                    (=float s (sin angle))
-                    (=float c (cos angle))
-                    (mat2 c (- 0 s) s c))}
-                  polar
-                  {([vec2 float float float float] vec2)
-                   ([pos reps sm correction displacement]
-                    (*= reps 0.5)
-                    (=float k (length pos))
-                    (=float x (* (asin (* (sin (* (atan pos.x pos.y)
-                                                  reps))
-                                          (- 1 sm)))
-                                 k))
-                    (=float ds (* k reps))
-                    (=float y (mix ds
-                                   (- (* 2 ds)
-                                      (sqrt (+ (* x x)
-                                               (* ds ds))))
-                                   correction))
-                    (vec2 (/ x reps)
-                          (- (/ y reps)
-                             displacement)))}
-                  gb
-                  {([vec3] float)
-                   ([x]
-                    (gaborNoise 3
-                                ~fxrand
-                                ~(u/genv (inc (fxrand-int 10))
-                                         (* (fxrand 0.1 0.25)
-                                            (Math/pow 10 (fxrand))))
-                                x))}
-                  gb2
-                  {([vec3] float)
-                   ([x]
-                    (gaborNoise 3
-                                ~fxrand
-                                ~(u/genv (inc (fxrand-int 10))
-                                         (* (fxrand 0.1 0.25)
-                                            (Math/pow 10 (fxrand))))
-                                x))}
-                  gb3
-                  {([vec3] float)
-                   ([x]
-                    (gaborNoise 3
-                                ~fxrand
-                                ~(u/genv (inc (fxrand-int 10))
-                                         (* (fxrand 0.1 0.25)
-                                            (Math/pow 10 (fxrand))))
-                                x))}
-                  fVoronoi
-                  {([vec3] float)
-                   ([pos]
-                    (=vec2 vor (.xy (voronoise3D (* 5 pos))))
-                    (distance vor.x vor.y))}
-                  sdf
-                  {([vec3] float)
-                   ~(cons '[pos]
-                          '((=int iters ~c/plane-iters)
-                            (=float d 1024)
-                            ("for(int i = 1; i <= iters; ++i)"
-                             (=vec3 rot-pos (* pos
-                                               (axisRoationMatrix (randSphere
-                                                                   (* 100 (vec3 (* 3 (fract (* (float i)
-                                                                                               (float i)
-                                                                                               ~(fxrand))))
-                                                                                (rand (vec2 (float i)
-                                                                                            (* (float i) (- 0 (pow ~(fxrand) (* (float i)
-                                                                                                                                (float i)))))))
-                                                                                (rand (vec2 (* (float i)
-                                                                                               (float i)
-                                                                                               (float i))
-                                                                                            (fract (* 0.333 (float i))))))))
-                                                                  (* ~u/TAU (rand (vec2 (pow 2 (float i))
-                                                                                        (rand (vec2 (mod (* 0.1 (float i)) ~(fxrand))
-                                                                                                    (- 0 (float i))))))))))
-                             (=float planes (sdBox rot-pos
-                                                   (vec3 0)
-                                                   (if (== (% i (* iters (int (floor (rand (vec2 (* (float i) ~(+ 250 (fxrand 1000)))
-                                                                                                 (* (float i) ~(+ 250 (fxrand 1000)))))))))
-                                                           ~(str (fxrand-int c/plane-iters)))
-                                                     (if (== (% i (* iters (int (floor (rand (vec2 (* (float i) ~(+ 250 (fxrand 1000)))
-                                                                                                   (* (float i) ~(+ 250 (fxrand 1000)))))))))
-                                                             ~(str (fxrand-int c/plane-iters)))
-                                                       (vec3 ~c/plane-size 1 1)
-                                                       (vec3 1 ~c/plane-size 1))
-                                                     (vec3 1 1 ~c/plane-size))))
-                             (= d (min d planes)))
-                            (=float shape ~(if (fxchance 0.5)
-                                             '(sdBox pos (vec3 0 0.25 -0.15) (vec3 0.5))
-                                             '(sdSphere pos (vec3 0 0.3 -0.3) 0.55)))
-                            (=float pedastal ~(if (fxchance 0.5)
-                                                c/slab
-                                                c/round-slab))
-                            (min (+ (smoothSubtraction d
-                                                       shape
-                                                       ~(fxrand 0.001 0.075))
-                                    (* ~(fxrand 0.01 0.2)
-                                       (smoothstep ~(- 0 (fxrand 0.5))
-                                                   1.25
-                                                   ~(let [n (fxrand)]
-                                                      (cond
-                                                        (< n 0.333) 'pos.y
-                                                        (< n 0.666) 'pos.x
-                                                        :else '(* -1 pos.x))))
-                                       (smoothstep -0.1 0.001 shape)
-                                       (-> ~(fxchoice {'(fbm gb
-                                                             3
-                                                             (+ (* ~(fxrand 0.5 1) pos)
-                                                                (* 0.1 (fbm gb2
-                                                                            3
-                                                                            (+ (* ~(fxrand 0.25 0.5) pos)
-                                                                               (* 0.1 (fbm gb3
-                                                                                           3
-                                                                                           (* ~(fxrand 0.1 0.3) pos)
-                                                                                           "5"
-                                                                                           0.25)))
-                                                                            "5"
-                                                                            0.5)))
-                                                             "5"
-                                                             0.75)
-                                                       1
-                                                       '(gaborNoise 3
-                                                                    ~fxrand
-                                                                    ~(u/genv (inc (fxrand-int 4))
-                                                                             (Math/pow 8 (fxrand)))
-                                                                    (+ pos (* 0.5
-                                                                              (gaborNoise 3
-                                                                                          ~fxrand
-                                                                                          ~(u/genv (inc (fxrand-int 4))
-                                                                                                   (Math/pow 4 (fxrand)))
-                                                                                          (+ pos (* 0.5
-                                                                                                    (gaborNoise 3
-                                                                                                                ~fxrand
-                                                                                                                ~(u/genv (inc (fxrand-int 4))
-                                                                                                                         (Math/pow 2 (fxrand)))
-                                                                                                                pos)))))))
-                                                       1
-                                                       '(gaborNoise 3
-                                                                    ~fxrand
-                                                                    ~(u/genv (inc (fxrand-int 4))
-                                                                             (Math/pow 3 (fxrand)))
-                                                                    (+ pos (* 0.5
-                                                                              (gaborNoise 3
-                                                                                          ~fxrand
-                                                                                          ~(u/genv (inc (fxrand-int 4))
-                                                                                                   (Math/pow 6 (fxrand)))
-                                                                                          pos))))
-                                                       1
-                                                       '(-> (gaborNoise 3
-                                                                        ~fxrand
-                                                                        ~(u/genv (inc (fxrand-int 4))
-                                                                                 (Math/pow 7 (fxrand)))
-                                                                        (+ pos (* 0.5 (gaborNoise 3
-                                                                                                  ~fxrand
-                                                                                                  ~(u/genv (inc (fxrand-int 4))
-                                                                                                           (Math/pow 5 (fxrand)))
-                                                                                                  pos))))
-                                                            sigmoid
-                                                            (* 2)
-                                                            (- 1))
-                                                       1})
-                                           (* 2)
-                                           sigmoid
-                                           (* 2)
-                                           (- 1))))
-                                 (+ pedastal
-                                    (* ~(fxrand 0.01 0.025)
-                                       (smoothstep -0.1 0.01 pedastal)
-                                       ~(fxchoice {'(-> (gaborNoise 3
-                                                                    ~fxrand
-                                                                    ~(u/genv (inc (fxrand-int 4))
-                                                                             (Math/pow 15 (fxrand)))
-                                                                    (+ pos (* 0.5 (gaborNoise 3
-                                                                                              ~fxrand
-                                                                                              ~(u/genv (inc (fxrand-int 4))
-                                                                                                       (Math/pow 10 (fxrand)))
-                                                                                              pos))))
-                                                        sigmoid
-                                                        (* 2)
-                                                        (- 1)) 1
-                                                   '(snoise3D (* pos ~(fxrand-int 4 10))) 1}))))))}
-                  }
+      :functions
+      {rot
+       {([float] mat2)
+        ([angle]
+         (=float s (sin angle))
+         (=float c (cos angle))
+         (mat2 c (- 0 s) s c))}
+       gb
+       {([vec3] float)
+        ([x]
+         (gaborNoise 3
+                     ~fxrand
+                     ~(u/genv (inc (fxrand-int 4))
+                              (Math/pow 4 (fxrand)))
+                     x))}
+       gb2
+       {([vec3] float)
+        ([x]
+        (gaborNoise 3
+                    ~fxrand
+                    ~(u/genv (inc (fxrand-int 4))
+                             (Math/pow 4 (fxrand)))
+                    x))}
+       fVoronoi
+       {([vec3] float)
+        ([pos]
+         (=vec2 vor (.xy (voronoise3D pos)))
+         (distance vor.x vor.y))}
+       sdf
+       {([vec3] float)
+        ~(cons
+          '[pos]
+          '((=float d ~c/plane-expr)
+            (=float shape ~(if (fxchance 0.5)
+                             '(sdBox pos (vec3 0 0.25 -0.15) (vec3 0.5))
+                             '(sdSphere pos (vec3 0 0.3 -0.3) 0.55)))
+            (=float pedastal ~(if (fxchance 0.5)
+                                c/slab
+                                c/round-slab))
+            (min (+ ~(if (fxchance 0.5)
+                       '(subtractionStair shape
+                                          d
+                                          ~(fxrand 0.05 0.2)
+                                          ~(inc (fxrand-int 3
+                                                            8)))
+                       '(smoothSubtraction d
+                                           shape
+                                           ~(fxrand 0.001 0.075)))
+                   ~(if (fxchance 0.2)
+                     '(-> pos
+                          (* ~(fxrand 1 5))
+                          fVoronoi
+                          (* ~(fxrand 0.05 0.15 0.75)))
+                     '(* ~(fxrand 0.05 0.1 0.75)
+                            (smoothstep ~(- 0 (fxrand 0.5))
+                                        1.25
+                                        ~(fxrand-nth ['pos.y
+                                                      'pos.x
+                                                      '(* -1 pos.x)]))
+                            
+                            (-> ~(fxrand-nth
+                                  ['(* (fbm gb
+                                            3
+                                            (+ (* ~(fxrand 1 2) pos)
+                                               (* 0.1
+                                                  (fbm gb2
+                                                       3
+                                                       (* ~(fxrand 1 2) pos)
+                                                       "5"
+                                                       0.75)))
+                                            "3"
+                                            0.9)
+                                       5)
+                                   '(gaborNoise 3
+                                                ~fxrand
+                                                ~(u/genv (inc (fxrand-int 3))
+                                                         (Math/pow 3 (fxrand)))
+                                                (+ pos (* 0.5
+                                                          (gaborNoise 3
+                                                                      ~fxrand
+                                                                      ~(u/genv (inc (fxrand-int 3))
+                                                                               (Math/pow 6 (fxrand)))
+                                                                      pos))))
+                                   '(gaborNoise 3
+                                                ~fxrand
+                                                ~(u/genv (inc (fxrand-int 4))
+                                                         (Math/pow 3 (fxrand)))
+                                                (+ pos (* 0.5 (gaborNoise 3
+                                                                          ~fxrand
+                                                                          ~(u/genv (inc (fxrand-int 4))
+                                                                                   (Math/pow 5 (fxrand)))
+                                                                          pos))))])
+                                (* 2)
+                                sigmoid
+                                (* 2)
+                                (- 1)))))
+                 (+ pedastal
+                    ~(if (fxchance 0.15)
+                       '(-> pos
+                            (* (axisRoationMatrix (normalize ~(cons 'vec3
+                                                                    (rand-n-sphere-point 3 fxrand)))
+                                                  ~(fxrand u/TAU)))
+                            (* ~(fxrand 2 7.5))
+                            fVoronoi
+                            (* ~(fxrand 0.05 0.15)))
+                       '(* ~(fxrand 0.01 0.02)
+                           ~(fxchoice {'(-> (gaborNoise 3
+                                                        ~fxrand
+                                                        ~(u/genv (inc (fxrand-int 3))
+                                                                 (Math/pow 15 (fxrand)))
+                                                        (+ pos (* 0.5 (gaborNoise 3
+                                                                                  ~fxrand
+                                                                                  ~(u/genv (inc (fxrand-int 4))
+                                                                                           (Math/pow 10 (fxrand)))
+                                                                                  pos))))
+                                            sigmoid
+                                            (* 2)
+                                            (- 1))
+                                       1
+                                       '(snoise3D (* pos ~(fxrand 2 10)))
+                                       1
+                                       '0
+                                       0.05})))))))}}
       :main ((=vec2 pos (getPos))
 
                     ;setup camera
@@ -761,21 +472,24 @@
                                                     0.001
                                                     surfacePos))
                    (= diff (max 0 (dot light-dir surfaceNorm)))
-                   (= ao (occlusion surfacePos surfaceNorm))
-                   (=float white-noise (* 0.01 (rand (* pos ~(fxrand 200 800)))))
+                   (=vec3 white-noise (* 0.01 (vec3 (rand (* pos ~(fxrand 200 1000)))
+                                                    (rand (* pos ~(fxrand 200 1000)))
+                                                    (rand (* pos ~(fxrand 200 1000))))))
 
                    (= col (-> surfaceNorm
+                              (+ white-noise)
                               normalize
                               (* 0.5)
                               (+ 0.5))))
 
               ;output 
              (= fragColor (-> col
-                              (vec4 (clamp (* ao ~c/diffusion-power ~c/light-scale)
+                              (vec4 (clamp (* ~c/diffusion-power ~c/light-scale)
                                            0
                                            ~c/light-max))
                               (* ~(long u32-max))
                               uvec4)))})))
+
 
 (def background-field-frag
   (u/unquotable

@@ -3,15 +3,18 @@
             [fxrng.rng :refer [fxrand
                                fxrand-nth
                                fxchance
-                               fxrand-int]]
+                               fxrand-int
+                               fxshuffle]]
+            [sprog.tools.math :refer [rand-n-sphere-point]]
             [clojure.math.combinatorics :refer [cartesian-product]]))
 
-;transport
+;global control
 (def frame-limit 600)
 (def special? (fxchance 0.02))
+(def u32-max (dec (Math/pow 2 32)))
 
 ;utilities
-(def circle-count 8)
+(def circle-count (inc (fxrand-int 4 8)))
 (def max-circle-radius 0.05)
 
 (defn check-overlap [[circle-one circle-two]]
@@ -51,13 +54,10 @@
 (def sqrt-sketch-particle-amount 512)
 (def sketch-particle-amount [sqrt-sketch-particle-amount 
                              sqrt-sketch-particle-amount])
-(def radius 0.0002)
-(def paretto? true)
-(def paretto-scale 2)
-(def paretto-shape 0.5)
+(def sketch-radius 0.0003)
 (def sketch-speed 0.00002)
 (def sketch-fade 0.999)
-(def sketch-randomization-chance 1)
+(def sketch-randomization-chance 0.998)
 
 ;background
 (def sqrt-background-particle-amount 128)
@@ -70,16 +70,16 @@
 (def background-particle-speed 0.0002)
 (def background-randomization-chance 0.99)
 (def frame-width 0.01)
+
 ;colors
 (def antique-white (cons 'vec3 (map #(/ % 255) (list 250 235 215))))
 (def yellow-beige (cons 'vec3 (map #(/ % 255) [244 212 170])))
 (def light-brown (cons 'vec3 (map #(/ % 255) [208 192 175])))
 (def olive (cons 'vec3 (map #(/ % 255) [64 64 0])))
-(def burnt-sienna (cons 'vec3 (map #(/ % 255) [213 69 35])))
-(def mustard (cons 'vec3 (map #(/ % 230) [209 169 70])))
+(def earth-brown (cons 'vec3 (map #(/ % 255) [188 129 95])))
+(def red-brown (cons 'vec3 (map #(/ % 255) [191 107 89])))
 (def red (cons 'vec3 (map #(/ % 230) [255 1 1])))
 (def yellow (cons 'vec3 (map #(/ % 255) [255 240 1])))
-(def blue (cons 'vec3 (map #(/ % 255) [1 1 253])))
 (def special-mode (u/unquotable ['(mixOklab ~red
                                             ~yellow
                                             (sigmoid (+ ~circle-expr
@@ -89,30 +89,38 @@
                                  0.9]))
 
 (def background-highlight  (if special?
-                            special-mode
-                            (fxrand-nth [[yellow-beige 0.75]
-                                         [light-brown 0.5]
-                                         [olive 0.15]])))
+                             special-mode 
+                             (fxrand-nth [[yellow-beige (+ 0.75 (fxrand -0.05 0.05))]
+                                          [light-brown (+ 0.5 (fxrand -0.05 0.05))]
+                                          [olive (+ 0.15 (fxrand -0.05 0.05))]
+                                          [earth-brown (+ 0.3 (fxrand -0.05 0.05))]
+                                          [red-brown (+ 0.5 (fxrand -0.05 0.05))]])))
 
 ;raymarching
-(def raymarch-anti-aliasing-samples (str 1))
-(def sphere-octaves 5)
-(def plane-iters (str (inc (fxrand-int 8 16))))
-(def plane-size (fxrand 0.03 0.05))
-
-(def ao-dist 0.05)
-(def ao-samples (str 8))
-(def ao-power 2)
-
+(def seed-tex-dimensions [64 64])
 (def light-pos '(vec3 1 -0.5 -0.5))
 (def light-scale 0.5)
-(def light-max 0.5)
+(def light-max 0.3)
 (def diffusion-power (cons '* (repeat 2 'diff)))
 
+(def plane-count (inc (fxrand-int 2 6)))
+(def plane-size (fxrand 0.03 0.05))
+(def axes [[plane-size 1 1]
+           [1 plane-size 1]
+           [1 1 plane-size]])
+(def planes (u/unquotable
+             (u/gen plane-count
+                    '(sdBox (* pos
+                               (axisRoationMatrix (normalize ~(cons 'vec3
+                                                                    (rand-n-sphere-point 3 fxrand)))
+                                                  ~(fxrand u/TAU)))
+                            (vec3 0)
+                            ~(cons 'vec3
+                                   (first (fxshuffle axes)))))))
 
-
-
-
+(def plane-expr (reduce (fn [expr term]
+                          (list 'min expr term))
+                        planes))
 
 (def slab (u/unquotable
            '(max (sdBox pos
