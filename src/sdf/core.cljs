@@ -113,7 +113,7 @@
                 {:textures {"particleTex" (second background-pos-texs)
                             "field" background-field-tex}
                  :floats {"size" resolution
-                          "radius" c/background-radius}
+                          "radius" 0.00025}
                  :ints {"sketch" (long 0)}}
                 {}
                 0
@@ -164,7 +164,7 @@
                             "field" normal-map-tex
                             "targetTex" sketch-trail-copy}
                  :floats {"size" resolution
-                          "radius" c/sketch-radius}
+                          "radius" 0.0003}
                  :ints {"sketch" (long 1)}}
                 {}
                 0
@@ -201,6 +201,7 @@
     state))
 
 (defn resize! [{:keys [gl] :as state}]
+  (maximize-gl-canvas gl)
   (let [resolution (canvas-resolution gl)]
     (-> state
         (merge {:resolution resolution
@@ -234,7 +235,6 @@
          :resize? false
          :save-image? false
          :resolution resolution
-
          :seed-tex
          (create-tex gl
                      :u32
@@ -258,6 +258,14 @@
         init-sketch!)))
 
 (defn init []
+  (set! js/document.title "Angels by Fay Carsons")
+  (u/log "hi!! (^_^)")
+  (u/log "this is Angels by Fay Carsons")
+  (u/log "Follow me(Fay Carsons) on social media @")
+  (u/log "Twitter: @hangedgirl23")
+  (u/log "Instagram: FayCarsons")
+  (u/log "thanks! bye bye ('3')")
+
   (add-key-callback "r" (fn []
                           (update-sprog-state!
                            #(assoc % :resize? true))))
@@ -271,5 +279,4 @@
   (init))
 
 (defn pre-init []
-  (js/eval "javascript:(function(){var script=document.createElement('script');script.onload=function(){var stats=new Stats();document.body.appendChild(stats.dom);requestAnimationFrame(function loop(){stats.update();requestAnimationFrame(loop)});};script.src='//mrdoob.github.io/stats.js/build/stats.min.js';document.head.appendChild(script);})()")
   (js/window.addEventListener "load" (fn [_] (init))))

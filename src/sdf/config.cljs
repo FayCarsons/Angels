@@ -10,7 +10,7 @@
 
 ;global control
 (def frame-limit 600)
-(def special? (fxchance 0.02))
+(def special? (fxchance (/ 30)))
 (def u32-max (dec (Math/pow 2 32)))
 
 ;utilities
@@ -54,7 +54,6 @@
 (def sqrt-sketch-particle-amount 512)
 (def sketch-particle-amount [sqrt-sketch-particle-amount 
                              sqrt-sketch-particle-amount])
-(def sketch-radius 0.0003)
 (def sketch-speed 0.00002)
 (def sketch-fade 0.999)
 (def sketch-randomization-chance 0.998)
@@ -64,7 +63,6 @@
 (def background-particle-amount [sqrt-background-particle-amount
                                  sqrt-background-particle-amount])
 (def background-field-resolution (u/genv 2 512))
-(def background-radius (if special? 0.0002 0.00025))
 (def background-fade 0.995)
 (def background-reset-interval 5)
 (def background-particle-speed 0.0002)
@@ -94,13 +92,13 @@
                                           [light-brown (+ 0.5 (fxrand -0.05 0.05))]
                                           [olive (+ 0.15 (fxrand -0.05 0.05))]
                                           [earth-brown (+ 0.3 (fxrand -0.05 0.05))]
-                                          [red-brown (+ 0.5 (fxrand -0.05 0.05))]])))
+                                          [red-brown (+ 0.35 (fxrand -0.05 0.05))]])))
 
 ;raymarching
 (def seed-tex-dimensions [64 64])
 (def light-pos '(vec3 1 -0.5 -0.5))
-(def light-scale 0.5)
-(def light-max 0.3)
+(def light-scale 0.3)
+(def light-max 0.4)
 (def diffusion-power (cons '* (repeat 2 'diff)))
 
 (def plane-count (inc (fxrand-int 2 6)))

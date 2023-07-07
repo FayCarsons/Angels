@@ -4,7 +4,6 @@
             [sdf.chunks :as chunk]
             [sdf.config :as c]
             [sprog.iglu.chunks.noise :refer [rand-chunk
-                                             rand-sphere-chunk
                                              simplex-3d-chunk
                                              simplex-2d-chunk
                                              fbm-chunk
@@ -277,9 +276,8 @@
                   (> (+ particlePos.y (* field.y speed)) 1)
                   (< (+ particlePos.x (* field.x speed)) 0)
                   (< (+ particlePos.y (* field.y speed)) 0)
-                  (> (rand (+ (* (+ pos particlePos)
-                                 400)
-                              (sin time)))
+                  (> (rand (* (+ pos particlePos)
+                              400))
                      (- randomizationChance
                         field.w)))
 
@@ -309,7 +307,7 @@
     sigmoid-chunk
     fbm-chunk
     rand-chunk
-    rand-sphere-chunk
+    rand-macro-chunk 
     axis-rotation-chunk
     chunk/voronoise-3d-chunk 
     chunk/subtraction-stair-chunk
@@ -365,14 +363,14 @@
                        '(smoothSubtraction d
                                            shape
                                            ~(fxrand 0.001 0.075)))
-                   ~(if (fxchance 0.2)
+                   ~(if false #_(fxchance 0.2)
                      '(-> pos
                           (* ~(fxrand 1 5))
                           fVoronoi
                           (* ~(fxrand 0.05 0.15 0.75)))
                      '(* ~(fxrand 0.05 0.1 0.75)
-                            (smoothstep ~(- 0 (fxrand 0.5))
-                                        1.25
+                            (smoothstep ~(- 0 (fxrand 1))
+                                        2
                                         ~(fxrand-nth ['pos.y
                                                       'pos.x
                                                       '(* -1 pos.x)]))
@@ -441,30 +439,25 @@
                                        '0
                                        0.05})))))))}}
       :main ((=vec2 pos (getPos))
-
-                    ;setup camera
+             
              (=vec3 cam-pos (vec3 0 0 -2))
              (=vec3 origin (vec3 0))
              (=vec3 light-pos ~c/light-pos)
              (=vec3 light-dir (normalize (- cam-pos light-pos)))
+             
+             (=Ray ray (cameraRay pos origin cam-pos 0.75)) 
 
-                    ;create ray 
-             (=Ray ray (cameraRay pos origin cam-pos 0.75))
-
-                    ;initialize variables  
              (=vec3 surfacePos (vec3 0))
              (=vec3 surfaceNorm (vec3 0))
              (=vec3 col (vec3 0))
              (=float diff 0)
-             (=float ao 1)
 
 
              (=float distance (raymarch sdf
                                         ray
-                                        10
-                                        {:step-size 0.1
-                                         :termination-threshold 0.001}))
-                    ;do distance estimation if object hit
+                                        15
+                                        {:step-size 0.05
+                                         :termination-threshold 0.001})) 
              ("if" (> distance 0)
                    (=vec3 surfacePos (+ ray.pos (* ray.dir distance)))
                    (=vec3 surfaceNorm (findGradient 3
@@ -472,17 +465,14 @@
                                                     0.001
                                                     surfacePos))
                    (= diff (max 0 (dot light-dir surfaceNorm)))
-                   (=vec3 white-noise (* 0.01 (vec3 (rand (* pos ~(fxrand 200 1000)))
-                                                    (rand (* pos ~(fxrand 200 1000)))
-                                                    (rand (* pos ~(fxrand 200 1000))))))
-
+                   (=vec3 white-noise (* 0.01 (vec3 (:rand pos)
+                                                    (:rand pos)
+                                                    (:rand pos))))
                    (= col (-> surfaceNorm
                               (+ white-noise)
                               normalize
                               (* 0.5)
                               (+ 0.5))))
-
-              ;output 
              (= fragColor (-> col
                               (vec4 (clamp (* ~c/diffusion-power ~c/light-scale)
                                            0
