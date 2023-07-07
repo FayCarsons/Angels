@@ -258,14 +258,8 @@
         init-sketch!)))
 
 (defn init []
-  (set! js/document.title "Angels by Fay Carsons")
-  (u/log "hi!! (^_^)")
-  (u/log "this is Angels by Fay Carsons")
-  (u/log "Follow me(Fay Carsons) on social media @")
-  (u/log "Twitter: @hangedgirl23")
-  (u/log "Instagram: FayCarsons")
-  (u/log "thanks! bye bye ('3')")
-
+  (set! js/document.title "Angels")
+  ;re-renders at current resolution
   (add-key-callback "r" (fn []
                           (update-sprog-state!
                            #(assoc % :resize? true))))
