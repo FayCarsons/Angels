@@ -1,5 +1,5 @@
 # Angels
-Generative art piece/rendering engine utilizing raymarching and a particle system to emulate pencil and oil pastel.
+Generative art piece/rendering engine utilizing raymarching and a particle system to emulate traditional mediums such as pencil, watercolor or oil pastel.
 
 Released on [Fxhash](https://www.fxhash.xyz/generative/25566)
 
