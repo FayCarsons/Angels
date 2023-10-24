@@ -3,7 +3,7 @@ Generative art piece/rendering engine utilizing raymarching and a particle syste
 
 Released on [Fxhash](https://www.fxhash.xyz/generative/25566)
 
-Made w/ [sprog](https://github.com/Ella-Hoeppner/sprog), a Clojurescript-WebGL framework I contribute to. 
+Made w/ [sprog](https://github.com/Ella-Hoeppner/sprog), a Clojurescript-WebGL framework I co-authored. 
 
 # Examples
 ![example4](https://github.com/FayCarsons/Angels/assets/95594152/6c5e695c-1dc5-4f20-8109-d553babb4e3a)
